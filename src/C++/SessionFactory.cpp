@@ -65,6 +65,25 @@ Session *SessionFactory::create(const SessionID &sessionID, const Dictionary &se
     } else {
       processFixDataDictionary(sessionID, settings, dataDictionaryProvider);
     }
+  } else {
+    std::shared_ptr<DataDictionary> pDD(new DataDictionary());
+    if (settings.has(VALIDATE_FIELDS_OUT_OF_ORDER)) {
+      pDD->checkFieldsOutOfOrder(settings.getBool(VALIDATE_FIELDS_OUT_OF_ORDER));
+    }
+    if (settings.has(VALIDATE_FIELDS_HAVE_VALUES)) {
+      pDD->checkFieldsHaveValues(settings.getBool(VALIDATE_FIELDS_HAVE_VALUES));
+    }
+    if (settings.has(VALIDATE_USER_DEFINED_FIELDS)) {
+      pDD->checkUserDefinedFields(settings.getBool(VALIDATE_USER_DEFINED_FIELDS));
+    }
+    if (settings.has(ALLOW_UNKNOWN_MSG_FIELDS)) {
+      pDD->allowUnknownMsgFields(settings.getBool(ALLOW_UNKNOWN_MSG_FIELDS));
+    }
+    dataDictionaryProvider.addTransportDataDictionary(sessionID.getBeginString(), pDD);
+    if (sessionID.isFIXT()) {
+      ApplVerID applVerID = Message::toApplVerID(settings.getString(DEFAULT_APPLVERID));
+      dataDictionaryProvider.addApplicationDataDictionary(applVerID, pDD);
+    }
   }
 
   bool useLocalTime = false;

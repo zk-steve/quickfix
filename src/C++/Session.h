@@ -185,6 +185,8 @@ public:
 
   bool getPersistMessages() { return m_persistMessages; }
   void setPersistMessages(bool value) { m_persistMessages = value; }
+  bool getPersistIncomingMessages() { return m_persistIncomingMessages; }
+  void setPersistIncomingMessages(bool value) { m_persistIncomingMessages = value; }
 
   bool getValidateLengthAndChecksum() { return m_validateLengthAndChecksum; }
   void setValidateLengthAndChecksum(bool value) { m_validateLengthAndChecksum = value; }
@@ -214,7 +216,7 @@ public:
   bool send(Message &);
   void next(const UtcTimeStamp &now);
   void next(const std::string &, const UtcTimeStamp &now, bool queued = false);
-  void next(const Message &, const UtcTimeStamp &now, bool queued = false);
+  void next(Message, const UtcTimeStamp &now, bool queued = false);
   void disconnect();
 
   SEQNUM getExpectedSenderNum() { return m_state.getNextSenderMsgSeqNum(); }
@@ -234,6 +236,7 @@ private:
   bool sendRaw(Message &, SEQNUM msgSeqNum = 0);
   bool resend(Message &message);
   void persist(const Message &, const std::string &) EXCEPT(IOException);
+  void persistIncoming(const Message &, const std::string &) EXCEPT(IOException);
 
   void insertSendingTime(Header &);
   void insertOrigSendingTime(Header &, const UtcTimeStamp &now);
@@ -265,7 +268,7 @@ private:
   bool shouldSendReset();
 
   bool validLogonState(const MsgType &msgType);
-  void fromCallback(const MsgType &msgType, const Message &msg, const SessionID &sessionID);
+  void fromCallback(const MsgType &msgType, Message message, const SessionID &sessionID);
 
   void doBadTime(const Message &msg);
   void doBadCompID(const Message &msg);
@@ -321,6 +324,7 @@ private:
   bool m_refreshOnLogon;
   int m_timestampPrecision;
   bool m_persistMessages;
+  bool m_persistIncomingMessages;
   bool m_validateLengthAndChecksum;
   bool m_sendNextExpectedMsgSeqNum;
   bool m_isNonStopSession;

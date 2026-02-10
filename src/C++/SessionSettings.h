@@ -133,6 +133,7 @@ const char MILLISECONDS_IN_TIMESTAMP[] = "MillisecondsInTimeStamp";
 const char TIMESTAMP_PRECISION[] = "TimestampPrecision";
 const char HTTP_ACCEPT_PORT[] = "HttpAcceptPort";
 const char PERSIST_MESSAGES[] = "PersistMessages";
+const char PERSIST_INCOMING_MESSAGES[] = "PersistIncomingMessages";
 const char SERVER_CERTIFICATE_FILE[] = "ServerCertificateFile";
 const char SERVER_CERTIFICATE_KEY_FILE[] = "ServerCertificateKeyFile";
 const char CLIENT_CERTIFICATE_FILE[] = "ClientCertificateFile";

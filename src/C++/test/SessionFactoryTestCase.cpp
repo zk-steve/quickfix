@@ -100,4 +100,43 @@ TEST_CASE("SessionFactoryTests") {
 
     CHECK_THROWS(object.create(sessionID, settings));
   }
+
+  SECTION("persistIncomingMessagesDefaultsToNo") {
+    NullApplication application;
+    MemoryStoreFactory messageStoreFactory;
+    SessionFactory object(application, messageStoreFactory, 0);
+
+    SessionID sessionID("FIX.4.2", "SENDER", "TARGET");
+    Dictionary settings;
+    settings.setString(CONNECTION_TYPE, "initiator");
+    settings.setString(USE_DATA_DICTIONARY, "N");
+    settings.setString(START_TIME, "12:00:00");
+    settings.setString(END_TIME, "12:00:00");
+    settings.setString(HEARTBTINT, "30");
+
+    Session *session = nullptr;
+    CHECK_NOTHROW(session = object.create(sessionID, settings));
+    CHECK(!session->getPersistIncomingMessages());
+    object.destroy(session);
+  }
+
+  SECTION("persistIncomingMessagesCanBeEnabled") {
+    NullApplication application;
+    MemoryStoreFactory messageStoreFactory;
+    SessionFactory object(application, messageStoreFactory, 0);
+
+    SessionID sessionID("FIX.4.2", "SENDER", "TARGET");
+    Dictionary settings;
+    settings.setString(CONNECTION_TYPE, "initiator");
+    settings.setString(USE_DATA_DICTIONARY, "N");
+    settings.setString(START_TIME, "12:00:00");
+    settings.setString(END_TIME, "12:00:00");
+    settings.setString(HEARTBTINT, "30");
+    settings.setString(PERSIST_INCOMING_MESSAGES, "Y");
+
+    Session *session = nullptr;
+    CHECK_NOTHROW(session = object.create(sessionID, settings));
+    CHECK(session->getPersistIncomingMessages());
+    object.destroy(session);
+  }
 }

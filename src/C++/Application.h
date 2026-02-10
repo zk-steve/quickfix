@@ -22,6 +22,8 @@
 #ifndef FIX_APPLICATION_H
 #define FIX_APPLICATION_H
 
+#include <utility>
+
 #include "Message.h"
 #include "Mutex.h"
 #include "SessionID.h"
@@ -52,12 +54,12 @@ public:
   virtual void toAdmin(Message &, const SessionID &) = 0;
   /// Notification of app message being sent to target
   virtual void toApp(Message &, const SessionID &) EXCEPT(DoNotSend) = 0;
-  /// Notification of admin message being received from target
-  virtual void fromAdmin(const Message &, const SessionID &)
+  /// Notification of admin message being received from target with ownership transfer.
+  virtual void fromAdmin(Message &&, const SessionID &)
       EXCEPT(FieldNotFound, IncorrectDataFormat, IncorrectTagValue, RejectLogon)
       = 0;
-  /// Notification of app message being received from target
-  virtual void fromApp(const Message &, const SessionID &)
+  /// Notification of app message being received from target with ownership transfer.
+  virtual void fromApp(Message &&, const SessionID &)
       EXCEPT(FieldNotFound, IncorrectDataFormat, IncorrectTagValue, UnsupportedMessageType)
       = 0;
 };
@@ -97,15 +99,15 @@ public:
     Locker l(m_mutex);
     app().toApp(message, sessionID);
   }
-  void fromAdmin(const Message &message, const SessionID &sessionID)
+  void fromAdmin(Message &&message, const SessionID &sessionID)
       EXCEPT(FieldNotFound, IncorrectDataFormat, IncorrectTagValue, RejectLogon) {
     Locker l(m_mutex);
-    app().fromAdmin(message, sessionID);
+    app().fromAdmin(std::move(message), sessionID);
   }
-  void fromApp(const Message &message, const SessionID &sessionID)
+  void fromApp(Message &&message, const SessionID &sessionID)
       EXCEPT(FieldNotFound, IncorrectDataFormat, IncorrectTagValue, UnsupportedMessageType) {
     Locker l(m_mutex);
-    app().fromApp(message, sessionID);
+    app().fromApp(std::move(message), sessionID);
   }
 
   Mutex m_mutex;
@@ -126,9 +128,9 @@ class NullApplication : public Application {
   void onLogout(const SessionID &) {}
   void toAdmin(Message &, const SessionID &) {}
   void toApp(Message &, const SessionID &) EXCEPT(DoNotSend) {}
-  void fromAdmin(const Message &, const SessionID &)
+  void fromAdmin(Message &&, const SessionID &)
       EXCEPT(FieldNotFound, IncorrectDataFormat, IncorrectTagValue, RejectLogon) {}
-  void fromApp(const Message &, const SessionID &)
+  void fromApp(Message &&, const SessionID &)
       EXCEPT(FieldNotFound, IncorrectDataFormat, IncorrectTagValue, UnsupportedMessageType) {}
 };
 /*! @} */

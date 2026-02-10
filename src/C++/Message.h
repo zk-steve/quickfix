@@ -191,6 +191,13 @@ public:
       int beginStringField = FIELD::BeginString,
       int bodyLengthField = FIELD::BodyLength,
       int checkSumField = FIELD::CheckSum) const;
+  /// Get a cached string representation without requiring a Rust allocation.
+  const std::string &toStringFrozen(
+      int beginStringField = FIELD::BeginString,
+      int bodyLengthField = FIELD::BodyLength,
+      int checkSumField = FIELD::CheckSum) const {
+    return toString(m_frozenString, beginStringField, bodyLengthField, checkSumField);
+  }
   /// Get a XML representation of the message
   std::string toXML() const;
   /// Get a XML representation without making a copy
@@ -385,6 +392,7 @@ private:
 protected:
   mutable Header m_header;
   mutable Trailer m_trailer;
+  mutable std::string m_frozenString;
   bool m_validStructure;
   int m_tag;
   static std::unique_ptr<DataDictionary> s_dataDictionary;

@@ -1013,6 +1013,45 @@ TEST_CASE_METHOD(sessionFixture, "SessionTestCase") {
     CHECK(!object->getPersistMessages());
   }
 
+  SECTION("sessionDoesNotPersistIncomingMessagesByDefault") {
+    createSession(1);
+    CHECK(!object->getPersistIncomingMessages());
+  }
+
+  SECTION("sessionPersistsIncomingMessages") {
+    createSession(1);
+    object->setPersistIncomingMessages(true);
+    CHECK(object->getPersistIncomingMessages());
+  }
+
+  SECTION("sessionDoesNotPersistIncomingMessages") {
+    createSession(1);
+    object->setPersistIncomingMessages(false);
+    CHECK(!object->getPersistIncomingMessages());
+  }
+
+  SECTION("sessionPersistsValidatedIncomingMessagesWhenEnabled") {
+    createSession(0);
+    object->setPersistIncomingMessages(true);
+    object->next(createLogon("ISLD", "TW", 1), now);
+
+    std::vector<std::string> messages;
+    const SEQNUM incomingStoreSeqNum = (static_cast<SEQNUM>(1) << ((sizeof(SEQNUM) * 8) - 1)) | 1;
+    object->getStore()->get(incomingStoreSeqNum, incomingStoreSeqNum, messages);
+    CHECK(1 == messages.size());
+  }
+
+  SECTION("sessionDoesNotPersistIncomingMessagesWhenDisabled") {
+    createSession(0);
+    object->setPersistIncomingMessages(false);
+    object->next(createLogon("ISLD", "TW", 1), now);
+
+    std::vector<std::string> messages;
+    const SEQNUM incomingStoreSeqNum = (static_cast<SEQNUM>(1) << ((sizeof(SEQNUM) * 8) - 1)) | 1;
+    object->getStore()->get(incomingStoreSeqNum, incomingStoreSeqNum, messages);
+    CHECK(0 == messages.size());
+  }
+
   SECTION("sessionValidatesLengthAndChecksum") {
     createSession(1);
     object->setValidateLengthAndChecksum(true);

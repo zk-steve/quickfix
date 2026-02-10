@@ -241,6 +241,9 @@ Session *SessionFactory::create(const SessionID &sessionID, const Dictionary &se
   if (settings.has(PERSIST_MESSAGES)) {
     pSession->setPersistMessages(settings.getBool(PERSIST_MESSAGES));
   }
+  if (settings.has(PERSIST_INCOMING_MESSAGES)) {
+    pSession->setPersistIncomingMessages(settings.getBool(PERSIST_INCOMING_MESSAGES));
+  }
   if (settings.has(VALIDATE_LENGTH_AND_CHECKSUM)) {
     pSession->setValidateLengthAndChecksum(settings.getBool(VALIDATE_LENGTH_AND_CHECKSUM));
   }

@@ -1193,9 +1193,9 @@ void Session::next(const std::string &msg, const UtcTimeStamp &now, bool queued)
     if (m_sessionID.isFIXT()) {
       const DataDictionary &applicationDD
           = m_dataDictionaryProvider.getApplicationDataDictionary(m_senderDefaultApplVerID);
-      next(Message(msg, sessionDD, applicationDD, m_validateLengthAndChecksum), now, queued);
+      nextInternal(Message(msg, sessionDD, applicationDD, m_validateLengthAndChecksum), now, queued, &msg);
     } else {
-      next(Message(msg, sessionDD, m_validateLengthAndChecksum), now, queued);
+      nextInternal(Message(msg, sessionDD, m_validateLengthAndChecksum), now, queued, &msg);
     }
   } catch (InvalidMessage &e) {
     m_state.onEvent(e.what());
@@ -1211,6 +1211,14 @@ void Session::next(const std::string &msg, const UtcTimeStamp &now, bool queued)
 }
 
 void Session::next(Message message, const UtcTimeStamp &now, bool queued) {
+  nextInternal(std::move(message), now, queued, nullptr);
+}
+
+void Session::nextInternal(
+    Message message,
+    const UtcTimeStamp &now,
+    bool queued,
+    const std::string *rawIncomingMessage) {
   const Header &header = message.getHeader();
   const Message *rejectMessage = &message;
   Message appRejectMessage;
@@ -1258,9 +1266,14 @@ void Session::next(Message message, const UtcTimeStamp &now, bool queued) {
     }
 
     if (!queued) {
-      std::string messageString;
-      message.toString(messageString);
-      persistIncoming(message, messageString);
+      if (rawIncomingMessage != nullptr) {
+        // Reuse the original wire bytes to avoid re-encoding inbound messages.
+        persistIncoming(message, *rawIncomingMessage);
+      } else {
+        std::string messageString;
+        message.toString(messageString);
+        persistIncoming(message, messageString);
+      }
     }
 
     if (msgType == MsgType_Logon) {

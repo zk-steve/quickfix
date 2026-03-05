@@ -31,7 +31,7 @@
 namespace FIX {
 bool Parser::extractLength(int &length, std::string::size_type &pos, const std::string &buffer)
     EXCEPT(MessageParseError) {
-  if (!buffer.size()) {
+  if (buffer.empty()) {
     return false;
   }
 
@@ -45,14 +45,7 @@ bool Parser::extractLength(int &length, std::string::size_type &pos, const std::
     return false;
   }
 
-  std::string strLength(buffer, startPos, endPos - startPos);
-
-  try {
-    length = IntConvertor::convert(strLength);
-    if (length < 0) {
-      throw MessageParseError();
-    }
-  } catch (FieldConvertError &) {
+  if (!IntConvertor::convert(buffer.begin() + startPos, buffer.begin() + endPos, length) || length < 0) {
     throw MessageParseError();
   }
 

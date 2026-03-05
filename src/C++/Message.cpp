@@ -26,6 +26,7 @@
 #include "Message.h"
 #include "Utility.h"
 #include "Values.h"
+#include <cstring>
 #include <iomanip>
 
 namespace FIX {
@@ -550,25 +551,33 @@ FIX::FieldBase Message::extractField(
     const DataDictionary *pSessionDD /*= 0*/,
     const DataDictionary *pAppDD /*= 0*/,
     const Group *pGroup /*= 0*/) const {
-  std::string::const_iterator const tagStart = string.begin() + pos;
-  std::string::const_iterator const strEnd = string.end();
+  const char *const raw = string.data();
+  const char *const tagStartPtr = raw + pos;
+  const char *const strEndPtr = raw + string.size();
+  const std::string::const_iterator tagStart = string.begin() + pos;
+  const std::string::const_iterator strEnd = string.end();
 
-  std::string::const_iterator const equalSign = std::find(tagStart, strEnd, '=');
-  if (equalSign == strEnd) {
+  const void *const equalSignRaw = std::memchr(tagStartPtr, '=', static_cast<size_t>(strEndPtr - tagStartPtr));
+  if (equalSignRaw == 0) {
     throw InvalidMessage("Equal sign not found in field");
   }
+  const char *const equalSignPtr = static_cast<const char *>(equalSignRaw);
+  const std::string::const_iterator equalSign = string.begin() + (equalSignPtr - raw);
 
   int field = 0;
   if (!IntConvertor::convert(tagStart, equalSign, field)) {
     throw InvalidMessage(std::string("Field tag is invalid: ") + std::string(tagStart, equalSign));
   }
 
+  const char *const valueStartPtr = equalSignPtr + 1;
   std::string::const_iterator const valueStart = equalSign + 1;
 
-  std::string::const_iterator soh = std::find(valueStart, strEnd, '\001');
-  if (soh == strEnd) {
+  const void *sohRaw = std::memchr(valueStartPtr, '\001', static_cast<size_t>(strEndPtr - valueStartPtr));
+  if (sohRaw == 0) {
     throw InvalidMessage("SOH not found at end of field");
   }
+  const char *sohPtr = static_cast<const char *>(sohRaw);
+  std::string::const_iterator soh = string.begin() + (sohPtr - raw);
 
   if (IsDataField(field, pSessionDD, pAppDD)) {
     // Assume length field is 1 less.
@@ -592,7 +601,12 @@ FIX::FieldBase Message::extractField(
 
     try {
       const FieldBase &fieldLength = location->reverse_find(lenField);
-      soh = valueStart + IntConvertor::convert(fieldLength.getString());
+      const int valueLength = IntConvertor::convert(fieldLength.getString());
+      if (valueLength < 0 || static_cast<size_t>(valueLength) > static_cast<size_t>(strEndPtr - valueStartPtr)) {
+        throw InvalidMessage("SOH not found at end of field");
+      }
+      sohPtr = valueStartPtr + valueLength;
+      soh = string.begin() + (sohPtr - raw);
     } catch (FieldNotFound &) {
       throw InvalidMessage(
           std::string("Data length field ") + IntConvertor::convert(lenField)

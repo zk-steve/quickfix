@@ -277,6 +277,7 @@ private:
   void doTargetTooHigh(const Message &msg);
   void nextQueued(const UtcTimeStamp &now);
   bool nextQueued(SEQNUM num, const UtcTimeStamp &now);
+  void nextInternal(Message, const UtcTimeStamp &now, bool queued, const std::string *rawIncomingMessage);
 
   void nextLogon(const Message &, const UtcTimeStamp &now);
   void nextHeartbeat(const Message &, const UtcTimeStamp &now);

@@ -104,7 +104,6 @@ private:
 
   void open(bool deleteFile);
   void populateCache();
-  bool readFromFile(int64_t offset, int size, std::string &msg);
   void setSeqNum();
   void setSession();
 

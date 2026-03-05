@@ -31,6 +31,7 @@
 #include "MessageSorters.h"
 #include "Utility.h"
 #include <algorithm>
+#include <cstring>
 #include <map>
 #include <sstream>
 #include <vector>
@@ -164,6 +165,28 @@ public:
   bool isSetField(const FieldBase &field) const { return isSetField(field.getTag()); }
   /// Check to see if a field is set by referencing its number
   bool isSetField(int tag) const { return findTag(tag) != m_fields.end(); }
+  /// Compare a field value by tag without materializing a temporary field payload.
+  bool isFieldEqual(int tag, const char *value, size_t valueLength) const {
+    if (value == 0) {
+      return false;
+    }
+
+    Fields::const_iterator field = findTag(tag);
+    if (field == m_fields.end()) {
+      return false;
+    }
+
+    const std::string &fieldValue = field->getString();
+    if (fieldValue.size() != valueLength) {
+      return false;
+    }
+
+    if (valueLength == 0) {
+      return true;
+    }
+
+    return std::memcmp(fieldValue.data(), value, valueLength) == 0;
+  }
 
   /// Remove a field. If field is not present, this is a no-op.
   void removeField(int tag);

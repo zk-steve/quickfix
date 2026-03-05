@@ -262,15 +262,13 @@ bool FileStore::set(SEQNUM msgSeqNum, const std::string &msg) EXCEPT(IOException
   if (it.second == false) {
     it.first->second = std::make_pair(offset, size);
   }
+  // Keep Java async ordering semantics: persist header index first.
+  if (fflush(m_headerFile) == EOF) {
+    throw IOException("Unable to flush file " + m_headerFileName);
+  }
   fwrite(msg.c_str(), sizeof(char), msg.size(), m_msgFile);
   if (ferror(m_msgFile)) {
     throw IOException("Unable to write to file " + m_msgFileName);
-  }
-  if (fflush(m_msgFile) == EOF) {
-    throw IOException("Unable to flush file " + m_msgFileName);
-  }
-  if (fflush(m_headerFile) == EOF) {
-    throw IOException("Unable to flush file " + m_headerFileName);
   }
   return true;
 }

@@ -24,13 +24,99 @@
 #include "SocketMonitor.h"
 #include "Utility.h"
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <iostream>
 #include <set>
 
 namespace FIX {
+#if defined(HAVE_IO_URING) && defined(__linux__)
+namespace {
+enum IoUringEventType : unsigned char {
+  IoUringReadEvent = 1,
+  IoUringConnectEvent = 2,
+  IoUringWriteEvent = 3
+};
+
+bool envValueIsFalse(const char *value) {
+  if (!value || !*value) {
+    return false;
+  }
+
+  return strcmp(value, "0") == 0 || strcmp(value, "false") == 0 || strcmp(value, "FALSE") == 0
+         || strcmp(value, "off") == 0 || strcmp(value, "OFF") == 0;
+}
+
+bool envValueIsTrue(const char *value) {
+  if (!value || !*value) {
+    return false;
+  }
+
+  return strcmp(value, "1") == 0 || strcmp(value, "true") == 0 || strcmp(value, "TRUE") == 0
+         || strcmp(value, "on") == 0 || strcmp(value, "ON") == 0;
+}
+
+bool ioUringEnabledByEnv() {
+  const char *enabled = std::getenv("QF_IO_URING");
+  if (!enabled) {
+    return true;
+  }
+  return !envValueIsFalse(enabled);
+}
+
+bool ioUringMultishotEnabledByEnv() {
+  const char *enabled = std::getenv("QF_IO_URING_MULTISHOT");
+  if (!enabled) {
+    return true;
+  }
+  return envValueIsTrue(enabled);
+}
+
+unsigned int ioUringEntriesFromEnv() {
+  const char *value = std::getenv("QF_IO_URING_ENTRIES");
+  if (!value || !*value) {
+    return 1024U;
+  }
+
+  char *end = 0;
+  unsigned long parsed = std::strtoul(value, &end, 10);
+  if (!end || *end != '\0' || parsed == 0UL) {
+    return 1024U;
+  }
+
+  if (parsed > 8192UL) {
+    return 8192U;
+  }
+  if (parsed < 64UL) {
+    return 64U;
+  }
+  return static_cast<unsigned int>(parsed);
+}
+
+uint64_t encodeIoUringUserData(socket_handle socket, unsigned char eventType) {
+  const uint32_t packedSocket = static_cast<uint32_t>(socket);
+  return (static_cast<uint64_t>(eventType) << 32U) | static_cast<uint64_t>(packedSocket);
+}
+
+unsigned char decodeIoUringEventType(uint64_t userData) { return static_cast<unsigned char>(userData >> 32U); }
+
+socket_handle decodeIoUringSocket(uint64_t userData) {
+  const uint32_t packedSocket = static_cast<uint32_t>(userData & 0xFFFFFFFFULL);
+  return static_cast<socket_handle>(packedSocket);
+}
+} // namespace
+#endif
+
 SocketMonitor::SocketMonitor(int timeout)
-    : m_timeout(timeout) {
+    : m_timeout(timeout)
+#if defined(HAVE_IO_URING) && defined(__linux__)
+      ,
+      m_useIoUring(false),
+      m_ioUringUsesMultishot(false),
+      m_ioUring()
+#endif
+{
   socket_init();
 
   std::pair<socket_handle, socket_handle> sockets = socket_createpair();
@@ -41,9 +127,18 @@ SocketMonitor::SocketMonitor(int timeout)
   m_readSockets.insert(m_interrupt);
 
   m_ticks = clock();
+
+#if defined(HAVE_IO_URING) && defined(__linux__)
+  std::memset(&m_ioUring, 0, sizeof(m_ioUring));
+  m_useIoUring = setupIoUring();
+#endif
 }
 
 SocketMonitor::~SocketMonitor() {
+#if defined(HAVE_IO_URING) && defined(__linux__)
+  teardownIoUring();
+#endif
+
   Sockets::iterator i;
   for (i = m_readSockets.begin(); i != m_readSockets.end(); ++i) {
     socket_close(*i);
@@ -100,6 +195,11 @@ bool SocketMonitor::drop(socket_handle s) {
     m_readSockets.erase(s);
     m_writeSockets.erase(s);
     m_connectSockets.erase(s);
+#if defined(HAVE_IO_URING) && defined(__linux__)
+    m_ioUringReadArmed.erase(s);
+    m_ioUringConnectArmed.erase(s);
+    m_ioUringWriteArmed.erase(s);
+#endif
     m_dropped.push(s);
     return true;
   }
@@ -149,9 +249,19 @@ void SocketMonitor::unsignal(socket_handle s) {
   }
 
   m_writeSockets.erase(s);
+
+#if defined(HAVE_IO_URING) && defined(__linux__)
+  m_ioUringWriteArmed.erase(s);
+#endif
 }
 
 void SocketMonitor::block(Strategy &strategy, bool should_poll, double timeout) {
+#if defined(HAVE_IO_URING) && defined(__linux__)
+  if (m_useIoUring && blockIoUring(strategy, should_poll, timeout)) {
+    return;
+  }
+#endif
+
   while (m_dropped.size()) {
     strategy.onError(*this, m_dropped.front());
     m_dropped.pop();
@@ -235,6 +345,202 @@ void SocketMonitor::buildSet(const Sockets &sockets, struct pollfd *pfds, short 
     i += 1;
   }
 }
+
+#if defined(HAVE_IO_URING) && defined(__linux__)
+bool SocketMonitor::setupIoUring() {
+  if (!ioUringEnabledByEnv()) {
+    return false;
+  }
+
+  const unsigned int queueEntries = ioUringEntriesFromEnv();
+  if (io_uring_queue_init(queueEntries, &m_ioUring, 0) < 0) {
+    return false;
+  }
+
+  m_ioUringUsesMultishot = ioUringMultishotEnabledByEnv();
+#ifndef IORING_POLL_ADD_MULTI
+  m_ioUringUsesMultishot = false;
+#endif
+  return true;
+}
+
+void SocketMonitor::teardownIoUring() {
+  if (!m_useIoUring) {
+    return;
+  }
+
+  io_uring_queue_exit(&m_ioUring);
+  m_useIoUring = false;
+  m_ioUringUsesMultishot = false;
+  m_ioUringReadArmed.clear();
+  m_ioUringConnectArmed.clear();
+  m_ioUringWriteArmed.clear();
+}
+
+bool SocketMonitor::armIoUringPoll(socket_handle socket, short events, unsigned char eventType, Sockets &armedSockets) {
+  if (armedSockets.find(socket) != armedSockets.end()) {
+    return true;
+  }
+
+  if (!socket_isValid(socket)) {
+    return true;
+  }
+
+  io_uring_sqe *sqe = io_uring_get_sqe(&m_ioUring);
+  if (!sqe) {
+    if (io_uring_submit(&m_ioUring) < 0) {
+      return false;
+    }
+    sqe = io_uring_get_sqe(&m_ioUring);
+    if (!sqe) {
+      return false;
+    }
+  }
+
+  io_uring_prep_poll_add(sqe, socket, events);
+#ifdef IORING_POLL_ADD_MULTI
+  if (m_ioUringUsesMultishot && eventType == IoUringReadEvent) {
+    sqe->len = IORING_POLL_ADD_MULTI;
+  }
+#endif
+  sqe->user_data = encodeIoUringUserData(socket, eventType);
+  armedSockets.insert(socket);
+  return true;
+}
+
+bool SocketMonitor::armIoUringPollers() {
+  for (Sockets::const_iterator iter = m_readSockets.begin(); iter != m_readSockets.end(); ++iter) {
+    if (!armIoUringPoll(*iter, POLLPRI | POLLIN, IoUringReadEvent, m_ioUringReadArmed)) {
+      return false;
+    }
+  }
+
+  for (Sockets::const_iterator iter = m_connectSockets.begin(); iter != m_connectSockets.end(); ++iter) {
+    if (!armIoUringPoll(*iter, POLLOUT | POLLERR, IoUringConnectEvent, m_ioUringConnectArmed)) {
+      return false;
+    }
+  }
+
+  for (Sockets::const_iterator iter = m_writeSockets.begin(); iter != m_writeSockets.end(); ++iter) {
+    if (!armIoUringPoll(*iter, POLLOUT, IoUringWriteEvent, m_ioUringWriteArmed)) {
+      return false;
+    }
+  }
+
+  return io_uring_submit(&m_ioUring) >= 0;
+}
+
+void SocketMonitor::handleIoUringCompletion(Strategy &strategy, io_uring_cqe *cqe) {
+  const socket_handle socket = decodeIoUringSocket(cqe->user_data);
+  const unsigned char eventType = decodeIoUringEventType(cqe->user_data);
+
+  Sockets *armedSockets = 0;
+  bool shouldDispatch = false;
+  if (eventType == IoUringReadEvent) {
+    armedSockets = &m_ioUringReadArmed;
+    shouldDispatch = m_readSockets.find(socket) != m_readSockets.end();
+  } else if (eventType == IoUringConnectEvent) {
+    armedSockets = &m_ioUringConnectArmed;
+    shouldDispatch = m_connectSockets.find(socket) != m_connectSockets.end();
+  } else if (eventType == IoUringWriteEvent) {
+    armedSockets = &m_ioUringWriteArmed;
+    shouldDispatch = m_writeSockets.find(socket) != m_writeSockets.end();
+  }
+
+  if (armedSockets) {
+    bool keepArmed = false;
+#ifdef IORING_CQE_F_MORE
+    keepArmed = m_ioUringUsesMultishot && eventType == IoUringReadEvent && ((cqe->flags & IORING_CQE_F_MORE) != 0);
+#endif
+    if (!keepArmed) {
+      armedSockets->erase(socket);
+    }
+  }
+
+  if (cqe->res < 0) {
+    if (cqe->res != -ECANCELED && cqe->res != -ENOENT && cqe->res != -EBADF) {
+      processError(strategy, socket);
+    }
+    return;
+  }
+
+  if (!shouldDispatch) {
+    return;
+  }
+
+  const short revents = static_cast<short>(cqe->res);
+  if ((revents & POLLIN) || (revents & POLLPRI)) {
+    processRead(strategy, socket);
+  }
+
+  if (revents & POLLOUT) {
+    processWrite(strategy, socket);
+  }
+
+  if (revents & (POLLERR | POLLHUP | POLLNVAL)) {
+    processError(strategy, socket);
+  }
+}
+
+bool SocketMonitor::blockIoUring(Strategy &strategy, bool should_poll, double timeout) {
+  while (m_dropped.size()) {
+    strategy.onError(*this, m_dropped.front());
+    m_dropped.pop();
+    if (m_dropped.size() == 0) {
+      return true;
+    }
+  }
+
+  if (sleepIfEmpty(should_poll)) {
+    strategy.onTimeout(*this);
+    return true;
+  }
+
+  if (!armIoUringPollers()) {
+    teardownIoUring();
+    return false;
+  }
+
+  io_uring_cqe *cqe = 0;
+  __kernel_timespec ts;
+  __kernel_timespec *timeoutTs = 0;
+  if (should_poll) {
+    ts.tv_sec = 0;
+    ts.tv_nsec = 0;
+    timeoutTs = &ts;
+  } else {
+    const int timeoutMs = getTimeval(should_poll, timeout);
+    ts.tv_sec = timeoutMs / 1000;
+    ts.tv_nsec = static_cast<long>((timeoutMs % 1000) * 1000000L);
+    timeoutTs = &ts;
+  }
+
+  int result;
+  do {
+    result = io_uring_wait_cqe_timeout(&m_ioUring, &cqe, timeoutTs);
+  } while (result == -EINTR);
+
+  if (result == -ETIME) {
+    strategy.onTimeout(*this);
+    return true;
+  }
+
+  if (result < 0) {
+    teardownIoUring();
+    return false;
+  }
+
+  handleIoUringCompletion(strategy, cqe);
+  io_uring_cqe_seen(&m_ioUring, cqe);
+
+  while (io_uring_peek_cqe(&m_ioUring, &cqe) == 0) {
+    handleIoUringCompletion(strategy, cqe);
+    io_uring_cqe_seen(&m_ioUring, cqe);
+  }
+
+  return true;
+}
+#endif
 
 } // namespace FIX
 

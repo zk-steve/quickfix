@@ -36,6 +36,7 @@ option(HAVE_SSL "Build with SSL")
 option(HAVE_MYSQL "Build with MySQL")
 option(HAVE_POSTGRESQL "Build with PostgreSQL")
 option(HAVE_ODBC "Build with ODBC")
+option(HAVE_IO_URING "Build with Linux io_uring socket monitor backend" OFF)
 option(HAVE_PYTHON "Build with default Python version")
 option(HAVE_PYTHON3 "Build with default Python3 version")
 
@@ -80,6 +81,25 @@ include_directories(SYSTEM ${ODBC_INCLUDE_DIRS})
 set(ODBC_LIBRARIES "ODBC::ODBC")
 
 message("-- Building with ODBC")
+endif()
+
+if(HAVE_IO_URING)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR "HAVE_IO_URING requires Linux")
+endif()
+
+find_path(LIBURING_INCLUDE_DIR NAMES liburing.h)
+find_library(LIBURING_LIBRARY NAMES uring)
+
+if(NOT LIBURING_INCLUDE_DIR OR NOT LIBURING_LIBRARY)
+  message(FATAL_ERROR "HAVE_IO_URING requested but liburing was not found")
+endif()
+
+include_directories(${LIBURING_INCLUDE_DIR})
+set(LIBURING_LIBRARIES ${LIBURING_LIBRARY})
+message("-- Building with io_uring")
+message("-- LIBURING_INCLUDE_DIR: ${LIBURING_INCLUDE_DIR}")
+message("-- LIBURING_LIBRARY: ${LIBURING_LIBRARY}")
 endif()
 
 if (HAVE_PYTHON)

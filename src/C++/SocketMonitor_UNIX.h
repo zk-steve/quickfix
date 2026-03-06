@@ -35,6 +35,10 @@
 #include <set>
 #include <time.h>
 
+#if defined(HAVE_IO_URING) && defined(__linux__)
+#include <liburing.h>
+#endif
+
 #include "Utility.h"
 
 namespace FIX {
@@ -72,6 +76,15 @@ private:
   void processError(Strategy &, socket_handle socket_fd);
   void processPollList(Strategy &strategy, struct pollfd *pfds, unsigned pfds_size);
 
+#if defined(HAVE_IO_URING) && defined(__linux__)
+  bool setupIoUring();
+  void teardownIoUring();
+  bool blockIoUring(Strategy &strategy, bool should_poll, double timeout);
+  bool armIoUringPoll(socket_handle socket, short events, unsigned char eventType, Sockets &armedSockets);
+  bool armIoUringPollers();
+  void handleIoUringCompletion(Strategy &strategy, io_uring_cqe *cqe);
+#endif
+
   int m_timeout;
   clock_t m_ticks;
 
@@ -81,6 +94,15 @@ private:
   Sockets m_readSockets;
   Sockets m_writeSockets;
   Queue m_dropped;
+
+#if defined(HAVE_IO_URING) && defined(__linux__)
+  bool m_useIoUring;
+  bool m_ioUringUsesMultishot;
+  struct io_uring m_ioUring;
+  Sockets m_ioUringReadArmed;
+  Sockets m_ioUringConnectArmed;
+  Sockets m_ioUringWriteArmed;
+#endif
 
 public:
   class Strategy {

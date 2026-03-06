@@ -6,5 +6,6 @@
 #cmakedefine HAVE_MYSQL
 #cmakedefine HAVE_POSTGRESQL
 #cmakedefine HAVE_SSL 1
+#cmakedefine HAVE_IO_URING 1
 
 #endif

@@ -222,6 +222,16 @@ void SocketMonitor::processPollList(Strategy &strategy, struct pollfd *pfds, uns
     if ((pfds[i].revents & POLLERR)) {
       processError(strategy, pfds[i].fd);
     }
+    // A failed non-blocking connect reports only POLLHUP on macOS (no
+    // POLLERR/POLLOUT). Previously that event matched no branch, so the
+    // socket stayed in the connect set, poll() returned immediately forever
+    // (100% CPU) and onTimeout-driven reconnects never ran. Surface it as an
+    // error so the session disconnects and retries. Sockets that are also
+    // readable keep draining first via the POLLIN branch above.
+    if ((pfds[i].revents & (POLLHUP | POLLNVAL))
+        && !(pfds[i].revents & (POLLIN | POLLPRI | POLLOUT | POLLERR))) {
+      processError(strategy, pfds[i].fd);
+    }
   }
 }
 

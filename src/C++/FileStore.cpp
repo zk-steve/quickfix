@@ -270,6 +270,13 @@ bool FileStore::set(SEQNUM msgSeqNum, const std::string &msg) EXCEPT(IOException
   if (ferror(m_msgFile)) {
     throw IOException("Unable to write to file " + m_msgFileName);
   }
+  // The body must reach the OS too: external readers (reject mapping,
+  // recovery) locate messages via the flushed header index, and an
+  // unflushed body makes those offsets dangle (upstream QuickFIX flushes
+  // both files here as well).
+  if (fflush(m_msgFile) == EOF) {
+    throw IOException("Unable to flush file " + m_msgFileName);
+  }
   return true;
 }
 
